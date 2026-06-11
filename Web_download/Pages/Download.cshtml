@@ -1,0 +1,239 @@
+﻿@page
+@model Web_download.Pages.DownloadModel
+@{
+    ViewData["Title"] = "文件管理器";
+}
+
+<h1>文件管理器</h1>
+
+@* 手动生成防伪令牌（关键修复）*@
+@Html.AntiForgeryToken()
+
+@* 显示错误信息 *@
+@if (!ModelState.IsValid)
+{
+    <div class="alert alert-danger">
+        @foreach (var error in ModelState.Values.SelectMany(v => v.Errors))
+        {
+            <p>@error.ErrorMessage</p>
+        }
+    </div>
+}
+
+@* 文件列表 *@
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>
+                <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
+            </th>
+            <th>文件名</th>
+            <th>大小</th>
+            <th>修改时间</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var file in Model.Files)
+        {
+            <tr>
+                <td>
+                    <input type="checkbox" name="selectedFiles" value="@file.Name">
+                </td>
+                <td>@file.Name</td>
+                <td>@Model.FormatFileSize(file.Length)</td>
+                <td>@file.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                <td>
+                    @* ✅ HTTP 下也能工作的纯 a 标签（带 rel="noopener" 防 XSS） *@
+                    <a href="/Download?handler=Download&fileName=@Uri.EscapeDataString(file.Name)"
+                       download="@file.Name"
+                       rel="noopener"
+                       target="_blank"
+                       class="btn btn-sm btn-primary">
+                        下载
+                    </a>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@* 批量下载按钮 *@
+@if (Model.Files.Any())
+{
+    <button id="downloadSelected" class="btn btn-success" onclick="downloadSelectedFiles()">下载选中文件</button>
+}
+
+@* ✅ 【关键】将此 script 放在 </body> 之前，不要放在 @section Scripts{} 内 *@
+<script>
+    // ✅ 强制确保 JS 在 DOM 加载后执行（避免元素未挂载）
+    document.addEventListener('DOMContentLoaded', function () {
+        // ✅ 全局下载函数（已加固：HTTPS 检测 + fetch 降级 + Blob 兼容性兜底）
+        window.downloadSingle = async function (encodedFileName, originalName) {
+            const url = `/Download?handler=Download&fileName=${encodedFileName}`;
+
+            try {
+                // 🔑 Step 0: HTTPS 强制检查（HTTP 下直接 fallback）
+                if (location.protocol !== 'https:') {
+                    console.warn('⚠️ 当前为 HTTP 协议，不支持断点续传，启用传统下载');
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = originalName;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    return;
+                }
+
+                // Step 1: HEAD 预检（带超时保护）
+                const headController = new AbortController();
+                setTimeout(() => headController.abort(), 5000);
+
+                const headRes = await fetch(url, {
+                    method: 'HEAD',
+                    signal: headController.signal
+                });
+
+                if (!headRes.ok) {
+                    throw new Error(`HEAD 失败: ${headRes.status}`);
+                }
+
+                const contentLength = headRes.headers.get('content-length');
+                const acceptRanges = headRes.headers.get('accept-ranges');
+
+                // ✅ Step 2: 大文件 + 支持 Range → 用 fetch 分块
+                if (acceptRanges?.toLowerCase() === 'bytes' && contentLength && parseInt(contentLength) > 1024 * 1024) {
+                    await downloadWithRange(url, originalName, parseInt(contentLength));
+                    return;
+                }
+
+                // ✅ Step 3: fallback 到传统下载（兼容所有 WebView）
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = originalName;
+
+                // 🔑 关键修复：微信 iOS 需要 trigger click via MouseEvent
+                const event = new MouseEvent('click', {
+                    view: window,
+                    bubbles: true,
+                    cancelable: true
+                });
+                a.dispatchEvent(event);
+
+                // ✅ 兜底：如果 dispatchEvent 失效，尝试 append + click
+                if (!a.dispatchEvent(event)) {
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                }
+
+            } catch (err) {
+                console.error('❌ downloadSingle 失败:', err);
+                // 💡 终极保底：打开新标签页（用户可右上角「在浏览器中打开」）
+                alert(`下载失败：${err.message}\n\n📌 提示：请长按链接 → “在浏览器中打开” 重试`);
+                window.open(url, '_blank');
+            }
+        };
+
+        // ✅ 增强版 Range 下载（修复 iOS Blob URL 失效问题）
+        async function downloadWithRange(url, fileName, totalSize) {
+            const chunkSize = 1024 * 1024; // 1MB 更稳妥
+            let downloaded = 0;
+            const chunks = [];
+
+            try {
+                while (downloaded < totalSize) {
+                    const start = downloaded;
+                    const end = Math.min(downloaded + chunkSize - 1, totalSize - 1);
+
+                    const res = await fetch(url, {
+                        headers: { 'Range': `bytes=${start}-${end}` }
+                    });
+
+                    if (res.status !== 206) {
+                        throw new Error(`服务端未返回 206（返回 ${res.status}）`);
+                    }
+
+                    const arrayBuffer = await res.arrayBuffer();
+                    chunks.push(arrayBuffer);
+                    downloaded += arrayBuffer.byteLength;
+                }
+
+                // ✅ iOS 微信兼容：不用 URL.createObjectURL，改用 <a href="blob:...">（需 Blob URL）
+                const fullBlob = new Blob(chunks, { type: 'application/octet-stream' });
+
+                // 🔑 关键兼容写法：iOS 微信要求 blob URL 必须由 a.href 直接赋值（不能先 createObjectURL 再 click）
+                const blobUrl = URL.createObjectURL(fullBlob);
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = fileName;
+
+                // ✅ 触发下载（兼容 iOS）
+                if (typeof a.download !== 'undefined') {
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(blobUrl);
+                } else {
+                    window.location.href = blobUrl; // 降级
+                }
+
+            } catch (err) {
+                console.error('Range 下载失败:', err);
+                throw err;
+            }
+        }
+    });
+
+    // ✅ 保持原有 toggleSelectAll 和 downloadSelectedFiles（无需修改）
+    function toggleSelectAll(checkbox) {
+        const checkboxes = document.querySelectorAll('input[name="selectedFiles"]');
+        checkboxes.forEach(cb => cb.checked = checkbox.checked);
+    }
+
+    async function downloadSelectedFiles() {
+        const selectedFiles = Array.from(document.querySelectorAll('input[name="selectedFiles"]:checked'))
+            .map(cb => cb.value);
+
+        if (selectedFiles.length === 0) {
+            alert('请选择要下载的文件');
+            return;
+        }
+
+        const btn = document.getElementById('downloadSelected');
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '打包中...';
+
+        try {
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/Download?handler=DownloadMultiple';
+
+            const antiForgeryToken = document.querySelector('input[name="__RequestVerificationToken"]').value;
+            const tokenInput = document.createElement('input');
+            tokenInput.type = 'hidden';
+            tokenInput.name = '__RequestVerificationToken';
+            tokenInput.value = antiForgeryToken;
+            form.appendChild(tokenInput);
+
+            selectedFiles.forEach(fileName => {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'selectedFiles';
+                input.value = fileName;
+                form.appendChild(input);
+            });
+
+            document.body.appendChild(form);
+            form.submit();
+            document.body.removeChild(form);
+        } catch (err) {
+            console.error('批量下载异常:', err);
+            alert(`❌ 批量下载失败：${err.message}`);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    }
+</script>
