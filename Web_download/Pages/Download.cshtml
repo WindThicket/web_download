@@ -1,0 +1,105 @@
+﻿@page
+@model Web_download.Pages.DownloadModel
+@{
+    ViewData["Title"] = "文件管理器";
+}
+
+<h1>文件管理器</h1>
+
+@* 手动生成防伪令牌（关键修复）*@
+@Html.AntiForgeryToken()
+
+@* 显示错误信息 *@
+@if (!ModelState.IsValid)
+{
+    <div class="alert alert-danger">
+        @foreach (var error in ModelState.Values.SelectMany(v => v.Errors))
+        {
+            <p>@error.ErrorMessage</p>
+        }
+    </div>
+}
+
+@* 文件列表 *@
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>
+                <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
+            </th>
+            <th>文件名</th>
+            <th>大小</th>
+            <th>修改时间</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var file in Model.Files)
+        {
+            <tr>
+                <td>
+                    <input type="checkbox" name="selectedFiles" value="@file.Name">
+                </td>
+                <td>@file.Name</td>
+                <td>@Model.FormatFileSize(file.Length)</td> <!-- 使用Model.FormatFileSize()调用PageModel类中的方法 -->
+                <td>@file.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                <td>
+                    <a href="/Download?handler=Download&fileName=@Uri.EscapeDataString(file.Name)" class="btn btn-sm btn-primary">下载</a>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@* 批量下载按钮 *@
+@if (Model.Files.Any())
+{
+    <button id="downloadSelected" class="btn btn-success" onclick="downloadSelectedFiles()">下载选中文件</button>
+}
+
+@* 选择全部/取消全部脚本 *@
+<script>
+    //切换全选/取消全选
+    function toggleSelectAll(checkbox) {
+    const checkboxes = document.querySelectorAll('input[name="selectedFiles"]');
+    checkboxes.forEach(cb => cb.checked = checkbox.checked);
+    }
+
+    // 下载选中文件
+    function downloadSelectedFiles() {
+    const selectedFiles = Array.from(document.querySelectorAll('input[name="selectedFiles"]:checked'))
+        .map(cb => cb.value);
+
+        if (selectedFiles.length === 0) {
+            alert('请选择要下载的文件');
+            return;
+        }
+
+        // 创建表单提交   Download?handler=DownloadMultiple其中Download指页面，?handler=Download: 指定调用该页面中的 OnGetDownload 或 OnPostDownload 方法（Handler）
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/Download?handler=DownloadMultiple';
+
+        // 添加防跨站请求伪造令牌
+        const antiForgeryToken = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        const tokenInput = document.createElement('input');
+        tokenInput.type = 'hidden';
+        tokenInput.name = '__RequestVerificationToken';
+        tokenInput.value = antiForgeryToken;
+        form.appendChild(tokenInput);
+
+        // 添加选中的文件
+        selectedFiles.forEach(fileName => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'selectedFiles';
+            input.value = fileName;
+            form.appendChild(input);
+        });
+
+        // 提交表单
+        document.body.appendChild(form);
+        form.submit();
+        document.body.removeChild(form);
+    }
+</script>
