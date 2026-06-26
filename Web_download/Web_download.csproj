@@ -9,6 +9,9 @@
   <ItemGroup>
     <None Update="smydownload.pfx">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+	  <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		<ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+		<!-- 防单文件打包丢失 -->
     </None>
   </ItemGroup>
 

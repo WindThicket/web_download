@@ -187,13 +187,13 @@
 
     // ✅ 保持原有 toggleSelectAll 和 downloadSelectedFiles（无需修改）
     function toggleSelectAll(checkbox) {
-        const checkboxes = document.querySelectorAll('input[name="selectedFiles"]');
-        checkboxes.forEach(cb => cb.checked = checkbox.checked);
+    const checkboxes = document.querySelectorAll('input[name="selectedFiles"]');
+    checkboxes.forEach(cb => cb.checked = checkbox.checked);
     }
 
     async function downloadSelectedFiles() {
-        const selectedFiles = Array.from(document.querySelectorAll('input[name="selectedFiles"]:checked'))
-            .map(cb => cb.value);
+    const selectedFiles = Array.from(document.querySelectorAll('input[name="selectedFiles"]:checked'))
+        .map(cb => cb.value);
 
         if (selectedFiles.length === 0) {
             alert('请选择要下载的文件');
@@ -206,28 +206,31 @@
         btn.textContent = '打包中...';
 
         try {
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = '/Download?handler=DownloadMultiple';
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/Download?handler=DownloadMultiple';
 
-            const antiForgeryToken = document.querySelector('input[name="__RequestVerificationToken"]').value;
-            const tokenInput = document.createElement('input');
-            tokenInput.type = 'hidden';
-            tokenInput.name = '__RequestVerificationToken';
-            tokenInput.value = antiForgeryToken;
-            form.appendChild(tokenInput);
+        // 添加防跨站请求伪造令牌
+        const antiForgeryToken = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        const tokenInput = document.createElement('input');
+        tokenInput.type = 'hidden';
+        tokenInput.name = '__RequestVerificationToken';
+        tokenInput.value = antiForgeryToken;
+        form.appendChild(tokenInput);
 
-            selectedFiles.forEach(fileName => {
-                const input = document.createElement('input');
-                input.type = 'hidden';
-                input.name = 'selectedFiles';
-                input.value = fileName;
-                form.appendChild(input);
-            });
+        // 添加选中的文件
+        selectedFiles.forEach(fileName => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'selectedFiles';
+            input.value = fileName;
+            form.appendChild(input);
+        });
 
-            document.body.appendChild(form);
-            form.submit();
-            document.body.removeChild(form);
+        // 提交表单
+        document.body.appendChild(form);
+        form.submit();
+        document.body.removeChild(form);
         } catch (err) {
             console.error('批量下载异常:', err);
             alert(`❌ 批量下载失败：${err.message}`);

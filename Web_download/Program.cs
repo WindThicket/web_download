@@ -13,6 +13,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
+
 var builder = WebApplication.CreateBuilder(args);
 //确认 Data Protection 是否初始化失败
 builder.Logging.AddConsole().AddFilter("Microsoft.AspNetCore.DataProtection", LogLevel.Debug);
@@ -230,6 +231,7 @@ app.UseRouting();
 var uploadsPath = Path.Combine(app.Environment.WebRootPath, "Uploads");
 Directory.CreateDirectory(uploadsPath); // 确保目录存在（即使为空）
 
+// 配置自定义静态文件目录（可选，适用于存储在项目根目录下的文件）
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new PhysicalFileProvider(uploadsPath),
@@ -242,6 +244,8 @@ app.UseStaticFiles(new StaticFileOptions
         // ctx.Context.Response.Headers.Append("Cache-Control", "public, max-age=31536000");
     }
 });
+
+app.UseRouting();
 
 app.UseAuthorization();
 // ✅ 6. Map endpoints 以上关键注册点在纳米AI中有具体分析
